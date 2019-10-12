@@ -5,16 +5,18 @@
 
 (def exceeded-file "/tmp/exceeded")
 
-(defn db [sqlite-db-file]
+(def ^:dynamic *db* nil)
+
+(defn- db [sqlite-db-file]
   {:classname   "org.sqlite.JDBC"
    :subprotocol "sqlite"
    :subname     sqlite-db-file})
 
-(defn create-table [sqlite-db-file]
-  (j/execute! (db sqlite-db-file) "create table heartbeat (dt date)"))
+(defn create-table []
+  (j/execute! *db* "create table heartbeat (dt date)"))
 
-(defn heartbeat [sqlite-db-file]
-  (j/insert! (db sqlite-db-file) :heartbeat {:dt (new java.util.Date)}))
+(defn heartbeat []
+  (j/insert! *db* :heartbeat {:dt (new java.util.Date)}))
 
 (defn midnight []
   (let [calendar (new java.util.GregorianCalendar)]
@@ -23,19 +25,25 @@
     (.set calendar java.util.Calendar/SECOND 0)
     (.getTime calendar)))
 
-(defn todays-limit-exceeded [sqlite-db-file limit]
+(defn todays-limit-exceeded [ limit]
   (let [from (midnight)
-        cnt (:cnt (first (j/query (db sqlite-db-file) ["select count(*) as cnt from heartbeat where dt > ?" (midnight)])))
+        cnt (:cnt (first (j/query *db* ["select count(*) as cnt from heartbeat where dt > ?" (midnight)])))
         f (io/file exceeded-file)]
     (if (> cnt limit)
       (.createNewFile f)
       (io/delete-file f true))))
 
+(defn cleanup []
+  (let [to (midnight)]
+    (j/execute! *db* ["delete from heartbeat where dt < ?" to])))
+
 (defn -main
   "I don't do a whole lot ... yet."
   [& args]
   (let [sqlite-db-file (first args)]
-    (when-not (.exists (io/file sqlite-db-file))
-      (create-table))
-    (heartbeat sqlite-db-file)
-    (todays-limit-exceeded sqlite-db-file 15)))
+    (binding [*db* (db sqlite-db-file)]
+      (when-not (.exists (io/file sqlite-db-file))
+        (create-table))
+      (heartbeat)
+      (cleanup)
+      (todays-limit-exceeded 15))))
